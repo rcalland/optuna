@@ -1,4 +1,5 @@
 from datetime import datetime
+from retry import retry
 from sqlalchemy import CheckConstraint
 from sqlalchemy import Column
 from sqlalchemy import DateTime
@@ -8,6 +9,7 @@ from sqlalchemy import Float
 from sqlalchemy import ForeignKey
 from sqlalchemy import func
 from sqlalchemy import Integer
+from sqlalchemy.exec import OperationalError
 from sqlalchemy import orm
 from sqlalchemy import String
 from sqlalchemy import UniqueConstraint
@@ -27,6 +29,12 @@ MAX_VERSION_LENGTH = 256
 
 NOT_FOUND_MSG = 'Record does not exist.'
 
+# retry parameters
+# see https://pypi.org/project/retry/
+RETRY_EXCEPTIONS = (OperationalError,)
+RETRY_TRIES = -1
+RETRY_JITTER = (0., 1) 
+
 BaseModel = declarative_base()  # type: Any
 
 
@@ -36,6 +44,7 @@ class StudyModel(BaseModel):
     study_name = Column(String(MAX_INDEXED_STRING_LENGTH), index=True, unique=True, nullable=False)
     direction = Column(Enum(StudyDirection), nullable=False)
 
+    @retry(RETRY_EXCEPTIONS, tries=RETRY_TRIES, jitter=RETRY_JITTER)
     @classmethod
     def find_by_id(cls, study_id, session):
         # type: (int, orm.Session) -> Optional[StudyModel]
@@ -142,6 +151,7 @@ class TrialModel(BaseModel):
 
     study = orm.relationship(StudyModel)
 
+    @retry(RETRY_EXCEPTIONS, tries=RETRY_TRIES, jitter=RETRY_JITTER)
     @classmethod
     def find_by_id(cls, trial_id, session):
         # type: (int, orm.Session) -> Optional[TrialModel]
