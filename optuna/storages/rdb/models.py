@@ -1,5 +1,7 @@
 import time
 from datetime import datetime
+from decorator import decorator
+import functools
 from sqlalchemy import CheckConstraint
 from sqlalchemy import Column
 from sqlalchemy import DateTime
@@ -44,7 +46,7 @@ def _retry(func, session, exceptions, tries, wait):
 
 def retry(exceptions=(OperationalError,), tries=-1, wait=1):
     @decorator
-    def retry_wrapper(func, *args, *kwargs):
+    def retry_wrapper(func, *args, **kwargs):
         # this assumes that session is the last arg of the function
         return _retry(functools.partial(func, *args, **kwargs), args[-1], exceptions, tries, wait)
     return retry_wrapper
