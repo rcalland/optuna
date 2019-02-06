@@ -1,4 +1,7 @@
+import time
 from datetime import datetime
+from decorator import decorator
+import functools
 from sqlalchemy import CheckConstraint
 from sqlalchemy import Column
 from sqlalchemy import DateTime
@@ -8,6 +11,7 @@ from sqlalchemy import Float
 from sqlalchemy import ForeignKey
 from sqlalchemy import func
 from sqlalchemy import Integer
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import orm
 from sqlalchemy import String
 from sqlalchemy import UniqueConstraint
@@ -30,13 +34,32 @@ NOT_FOUND_MSG = 'Record does not exist.'
 BaseModel = declarative_base()  # type: Any
 
 
+def _retry(func, session, exceptions, tries, wait):
+    while tries:
+        try:
+            return func()
+        except exceptions:
+            time.sleep(wait)
+            session.rollback()
+            tries -= 1
+
+
+def retry(exceptions=(OperationalError,), tries=-1, wait=1):
+    @decorator
+    def retry_wrapper(func, *args, **kwargs):
+        # this assumes that session is the last arg of the function
+        return _retry(functools.partial(func, *args, **kwargs), args[-1], exceptions, tries, wait)
+    return retry_wrapper
+
+
 class StudyModel(BaseModel):
     __tablename__ = 'studies'
     study_id = Column(Integer, primary_key=True)
     study_name = Column(String(MAX_INDEXED_STRING_LENGTH), index=True, unique=True, nullable=False)
     direction = Column(Enum(StudyDirection), nullable=False)
-
+ 
     @classmethod
+    @retry()
     def find_by_id(cls, study_id, session):
         # type: (int, orm.Session) -> Optional[StudyModel]
 
@@ -55,6 +78,7 @@ class StudyModel(BaseModel):
         return study
 
     @classmethod
+    @retry()
     def find_by_name(cls, study_name, session):
         # type: (str, orm.Session) -> Optional[StudyModel]
 
@@ -73,6 +97,7 @@ class StudyModel(BaseModel):
         return study
 
     @classmethod
+    @retry()
     def all(cls, session):
         # type: (orm.Session) -> List[StudyModel]
 
@@ -90,6 +115,7 @@ class StudyUserAttributeModel(BaseModel):
     study = orm.relationship(StudyModel)
 
     @classmethod
+    @retry()
     def find_by_study_and_key(cls, study, key, session):
         # type: (StudyModel, str, orm.Session) -> Optional[StudyUserAttributeModel]
 
@@ -99,6 +125,7 @@ class StudyUserAttributeModel(BaseModel):
         return attribute
 
     @classmethod
+    @retry()
     def where_study_id(cls, study_id, session):
         # type: (int, orm.Session) -> List[StudyUserAttributeModel]
 
@@ -116,6 +143,7 @@ class StudySystemAttributeModel(BaseModel):
     study = orm.relationship(StudyModel)
 
     @classmethod
+    @retry()
     def find_by_study_and_key(cls, study, key, session):
         # type: (StudyModel, str, orm.Session) -> Optional[StudySystemAttributeModel]
 
@@ -125,6 +153,7 @@ class StudySystemAttributeModel(BaseModel):
         return attribute
 
     @classmethod
+    @retry()
     def where_study_id(cls, study_id, session):
         # type: (int, orm.Session) -> List[StudySystemAttributeModel]
 
@@ -143,6 +172,7 @@ class TrialModel(BaseModel):
     study = orm.relationship(StudyModel)
 
     @classmethod
+    @retry()
     def find_by_id(cls, trial_id, session):
         # type: (int, orm.Session) -> Optional[TrialModel]
 
@@ -161,6 +191,7 @@ class TrialModel(BaseModel):
         return trial
 
     @classmethod
+    @retry()
     def where_study(cls, study, session):
         # type: (StudyModel, orm.Session) -> List[TrialModel]
 
@@ -169,6 +200,7 @@ class TrialModel(BaseModel):
         return trials
 
     @classmethod
+    @retry()
     def count(cls, session, study=None, state=None):
         # type: (orm.Session, Optional[StudyModel], Optional[TrialState]) -> int
 
@@ -181,6 +213,7 @@ class TrialModel(BaseModel):
         return trial_count.scalar()
 
     @classmethod
+    @retry()
     def all(cls, session):
         # type: (orm.Session) -> List[TrialModel]
 
@@ -198,6 +231,7 @@ class TrialUserAttributeModel(BaseModel):
     trial = orm.relationship(TrialModel)
 
     @classmethod
+    @retry()
     def find_by_trial_and_key(cls, trial, key, session):
         # type: (TrialModel, str, orm.Session) -> Optional[TrialUserAttributeModel]
 
@@ -207,6 +241,7 @@ class TrialUserAttributeModel(BaseModel):
         return attribute
 
     @classmethod
+    @retry()
     def where_study(cls, study, session):
         # type: (StudyModel, orm.Session) -> List[TrialUserAttributeModel]
 
@@ -216,12 +251,14 @@ class TrialUserAttributeModel(BaseModel):
         return trial_user_attributes
 
     @classmethod
+    @retry()
     def where_trial(cls, trial, session):
         # type: (TrialModel, orm.Session) -> List[TrialUserAttributeModel]
 
         return session.query(cls).filter(cls.trial_id == trial.trial_id).all()
 
     @classmethod
+    @retry()
     def all(cls, session):
         # type: (orm.Session) -> List[TrialUserAttributeModel]
 
@@ -239,6 +276,7 @@ class TrialSystemAttributeModel(BaseModel):
     trial = orm.relationship(TrialModel)
 
     @classmethod
+    @retry()
     def find_by_trial_and_key(cls, trial, key, session):
         # type: (TrialModel, str, orm.Session) -> Optional[TrialSystemAttributeModel]
 
@@ -248,6 +286,7 @@ class TrialSystemAttributeModel(BaseModel):
         return attribute
 
     @classmethod
+    @retry()
     def where_study(cls, study, session):
         # type: (StudyModel, orm.Session) -> List[TrialSystemAttributeModel]
 
@@ -257,12 +296,14 @@ class TrialSystemAttributeModel(BaseModel):
         return trial_system_attributes
 
     @classmethod
+    @retry()
     def where_trial(cls, trial, session):
         # type: (TrialModel, orm.Session) -> List[TrialSystemAttributeModel]
 
         return session.query(cls).filter(cls.trial_id == trial.trial_id).all()
 
     @classmethod
+    @retry()
     def all(cls, session):
         # type: (orm.Session) -> List[TrialSystemAttributeModel]
 
@@ -286,6 +327,7 @@ class TrialParamModel(BaseModel):
         self._check_compatibility_with_previous_trial_param_distributions(session)
         session.add(self)
 
+    @retry()
     def _check_compatibility_with_previous_trial_param_distributions(self, session):
         # type: (orm.Session) -> None
 
@@ -300,6 +342,7 @@ class TrialParamModel(BaseModel):
                 distributions.json_to_distribution(self.distribution_json))
 
     @classmethod
+    @retry()
     def find_by_trial_and_param_name(cls, trial, param_name, session):
         # type: (TrialModel, str, orm.Session) -> Optional[TrialParamModel]
 
@@ -321,6 +364,7 @@ class TrialParamModel(BaseModel):
         return param_distribution
 
     @classmethod
+    @retry()
     def where_study(cls, study, session):
         # type: (StudyModel, orm.Session) -> List[TrialParamModel]
 
@@ -330,6 +374,7 @@ class TrialParamModel(BaseModel):
         return trial_params
 
     @classmethod
+    @retry()
     def where_trial(cls, trial, session):
         # type: (TrialModel, orm.Session) -> List[TrialParamModel]
 
@@ -338,6 +383,7 @@ class TrialParamModel(BaseModel):
         return trial_params
 
     @classmethod
+    @retry()
     def all(cls, session):
         # type: (orm.Session) -> List[TrialParamModel]
 
@@ -355,6 +401,7 @@ class TrialValueModel(BaseModel):
     trial = orm.relationship(TrialModel)
 
     @classmethod
+    @retry()
     def find_by_trial_and_step(cls, trial, step, session):
         # type: (TrialModel, int, orm.Session) -> Optional[TrialValueModel]
 
@@ -365,6 +412,7 @@ class TrialValueModel(BaseModel):
         return trial_value
 
     @classmethod
+    @retry()
     def where_study(cls, study, session):
         # type: (StudyModel, orm.Session) -> List[TrialValueModel]
 
@@ -374,6 +422,7 @@ class TrialValueModel(BaseModel):
         return trial_values
 
     @classmethod
+    @retry()
     def where_trial(cls, trial, session):
         # type: (TrialModel, orm.Session) -> List[TrialValueModel]
 
@@ -382,6 +431,7 @@ class TrialValueModel(BaseModel):
         return trial_values
 
     @classmethod
+    @retry()
     def all(cls, session):
         # type: (orm.Session) -> List[TrialValueModel]
 
@@ -397,6 +447,7 @@ class VersionInfoModel(BaseModel):
     library_version = Column(String(MAX_VERSION_LENGTH))
 
     @classmethod
+    @retry()
     def find(cls, session):
         # type: (orm.Session) -> VersionInfoModel
 
